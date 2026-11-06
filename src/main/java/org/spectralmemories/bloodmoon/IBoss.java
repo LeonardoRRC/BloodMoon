@@ -16,5 +16,5 @@ public interface IBoss {
 
     Monster GetHost();
 
-    String GetName();
+    net.kyori.adventure.text.Component GetName();
 }

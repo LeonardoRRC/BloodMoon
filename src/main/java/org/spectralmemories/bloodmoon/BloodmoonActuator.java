@@ -10,14 +10,15 @@ import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import com.sk89q.worldguard.protection.regions.RegionQuery;
 import org.bukkit.*;
-import org.bukkit.boss.BarColor;
-import org.bukkit.boss.BarFlag;
-import org.bukkit.boss.BarStyle;
-import org.bukkit.boss.BossBar;
+import net.kyori.adventure.bossbar.BossBar;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.title.Title;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.*;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -64,10 +65,25 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
     private boolean inProgress;
 
     private BossBar nightBar;
+    private final Set<UUID> barViewers = new HashSet<>();
     private ActuatorPeriodic actuatorPeriodic;
 
     private List<LivingEntity> blacklistedMobs;
     private List<IBoss> bosses;
+
+    // 0.9
+    private boolean crimson = false;
+    private boolean forceCrimsonNext = false;
+    private final Map<UUID, Integer> kills = new HashMap<>();
+    private int ambientTask = -1;
+
+    private static final Set<CreatureSpawnEvent.SpawnReason> ENHANCED_REASONS = EnumSet.of(
+            CreatureSpawnEvent.SpawnReason.NATURAL,
+            CreatureSpawnEvent.SpawnReason.CUSTOM,
+            CreatureSpawnEvent.SpawnReason.REINFORCEMENTS,
+            CreatureSpawnEvent.SpawnReason.JOCKEY,
+            CreatureSpawnEvent.SpawnReason.PATROL
+    );
 
     private void AddActuator (BloodmoonActuator instance)
     {
@@ -94,22 +110,57 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
         inProgress = false;
         AddActuator(this);
         blacklistedMobs = new ArrayList<>();
+        bosses = new ArrayList<>();
 
         if (Bloodmoon.GetInstance().getConfigReader(world).GetPermanentBloodMoonConfig())
         {
             StartBloodMoon();
         }
+    }
 
-        bosses = new ArrayList<>();
+    /**
+     * La proxima BloodMoon que empiece en este mundo sera una Luna Carmesi
+     */
+    public void ForceNextCrimson ()
+    {
+        forceCrimsonNext = true;
+    }
+
+    public boolean IsCrimson ()
+    {
+        return crimson && isInProgress();
+    }
+
+    public World GetWorld ()
+    {
+        return world;
+    }
+
+    /**
+     * Multiplicador extra: 1.0 en una BloodMoon normal, CrimsonMoonMultiplier en una Luna Carmesi
+     */
+    public double GetDifficultyMultiplier ()
+    {
+        return crimson ? Bloodmoon.GetInstance().getConfigReader(world).GetCrimsonMultiplier() : 1.0;
     }
 
     public void StartBloodMoon ()
     {
+        ConfigReader startReader = Bloodmoon.GetInstance().getConfigReader(world);
+        boolean permanent = startReader.GetPermanentBloodMoonConfig();
+        double crimsonChance = startReader.GetDouble(ConfigReader.CRIMSON_MOON_CHANCE, 15);
+        crimson = forceCrimsonNext || (!permanent && crimsonChance > 0 && new Random().nextDouble() * 100 < crimsonChance);
+        forceCrimsonNext = false;
+        kills.clear();
+
         inProgress = true;
         RunPreCommand();
+        if (crimson) RunCommands(startReader.GetStringList(ConfigReader.COMMANDS_ON_CRIMSON_START).toArray(new String[0]));
 
         ShowNightBar();
         BroadcastBloodMoonWarning();
+        for (Player player : world.getPlayers()) ShowStartEffects(player);
+        StartAmbience();
 
         actuatorPeriodic = new ActuatorPeriodic(world);
         actuatorPeriodic.run();
@@ -125,16 +176,27 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
 
     public void StopBloodMoon ()
     {
+        StopBloodMoon(true);
+    }
+
+    /**
+     * @param giveRewards false al apagar el servidor, para no repartir premios de una luna a medias
+     */
+    public void StopBloodMoon (boolean giveRewards)
+    {
         if (Bloodmoon.GetInstance().getConfigReader(world).GetPermanentBloodMoonConfig())
         {
             return;
         }
+        if (giveRewards) HandleKillRewards();
         inProgress = false;
+        crimson = false;
 
         StopStorm();
         HideNightBar();
+        StopAmbience();
 
-        actuatorPeriodic.close();
+        if (actuatorPeriodic != null) actuatorPeriodic.close();
         actuatorPeriodic = null;
         blacklistedMobs.clear();
         KillBosses();
@@ -186,47 +248,46 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
         if (!reader.GetHordeEnabled()) return;
 
         Random random = new Random();
+        Location hordeSpawnLocation = target.getLocation().clone();
 
-        Location hordeSpawnLocation;
-        hordeSpawnLocation = target.getLocation().clone();
+        int mobAmount = Compat.randomBetween(reader.GetHordeMinPopulation(), reader.GetHordeMaxPopulation());
+        int maxDistance = Math.max(1, reader.GetHordeSpawnDistance());
 
-        int minMob = reader.GetHordeMinPopulation();
-        int maxMob = reader.GetHordeMaxPopulation();
-        int mobAmount = random.nextInt(maxMob - minMob) + minMob;
-        int maxDistance = reader.GetHordeSpawnDistance();
+        String[] mobList = reader.GetHordeMobWhitelist();
+        if (mobList.length == 0) return;
 
+        int spawned = 0;
         for (int i = 0; i < mobAmount; i++)
         {
-            String[] mobList = reader.GetHordeMobWhitelist();
-            int mobListLen = mobList.length;
-            EntityType mobType = EntityType.valueOf(mobList[random.nextInt(mobListLen)]);
-
-            Location newMobLocation = hordeSpawnLocation.clone();
-            if (random.nextBoolean())
+            String mobName = mobList[random.nextInt(mobList.length)];
+            EntityType mobType = Compat.entityType(mobName);
+            if (mobType == null || !mobType.isSpawnable() || !mobType.isAlive())
             {
-                newMobLocation = newMobLocation.add(random.nextInt(maxDistance), 0, random.nextInt(maxDistance));
-            } else
-            {
-                newMobLocation = newMobLocation.subtract(random.nextInt(maxDistance), 0, random.nextInt(maxDistance));
+                Compat.warn("Mob invalido en HordeMobWhitelist del mundo " + world.getName() + ": " + mobName);
+                continue;
             }
 
-            newMobLocation.setY(world.getHighestBlockYAt(newMobLocation));
+            Location newMobLocation = hordeSpawnLocation.clone().add(
+                    random.nextInt(maxDistance * 2 + 1) - maxDistance,
+                    0,
+                    random.nextInt(maxDistance * 2 + 1) - maxDistance);
+            newMobLocation.setY(world.getHighestBlockYAt(newMobLocation) + 1);
 
             world.spawnEntity(newMobLocation, mobType);
             world.strikeLightningEffect(newMobLocation);
+            spawned++;
         }
-        LocaleReader.MessageAllLocale("HordeArrived", new String[]{"$p"}, new String[]{target.getDisplayName()}, world);
+        if (spawned > 0)
+            LocaleReader.MessageAllLocale("HordeArrived", new String[]{"$p"}, new Object[]{target.displayName()}, world);
     }
 
     public void StartSpawningOfHordes ()
     {
         ConfigReader reader = Bloodmoon.GetInstance().getConfigReader(world);
-        Random random = new Random();
-
         if (!reader.GetHordeEnabled()) return;
 
-        int min = reader.GetHordeSpawnrateBaseline() - reader.GetHordeSpawnrateVariation();
-        int max = reader.GetHordeSpawnrateBaseline() + reader.GetHordeSpawnrateVariation();
+        int min = Math.max(20, reader.GetHordeSpawnrateBaseline() - reader.GetHordeSpawnrateVariation());
+        int max = Math.max(min, reader.GetHordeSpawnrateBaseline() + reader.GetHordeSpawnrateVariation());
 
         Bloodmoon.GetInstance().GetScheduler().scheduleSyncDelayedTask(Bloodmoon.GetInstance(), new Runnable()
         {
@@ -236,104 +297,56 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
                 if (isInProgress())
                 {
                     SpawnHorde();
-                    Bloodmoon.GetInstance().GetScheduler().scheduleSyncDelayedTask(Bloodmoon.GetInstance(), this, random.nextInt(max - min) + max);
+                    Bloodmoon.GetInstance().GetScheduler().scheduleSyncDelayedTask(Bloodmoon.GetInstance(), this, Compat.randomBetween(min, max));
                 }
             }
-        }, random.nextInt(max - min) + max);
+        }, Compat.randomBetween(min, max));
     }
 
 
     private void RunPreCommand ()
     {
-        String[] commands = Bloodmoon.GetInstance().getConfigReader(world).GetPreBloodMoonCommands();
-        String[] var2 = commands;
-        int var3 = commands.length;
-
-        for (int var4 = 0; var4 < var3; ++var4)
-        {
-            String command = var2[var4];
-            String[] components = command.split(";");
-            if (components[1].equalsIgnoreCase("s"))
-            {
-                String finalCommand = components[0].replace("$w", world.getName());
-                Bukkit.getServer().dispatchCommand(Bukkit.getServer().getConsoleSender(), finalCommand);
-            } else
-            {
-                Iterator var7;
-                Player player;
-                String finalCommand;
-                if (components[1].equalsIgnoreCase("p"))
-                {
-                    var7 = world.getPlayers().iterator();
-
-                    while (var7.hasNext())
-                    {
-                        player = (Player) var7.next();
-                        finalCommand = components[0].replace("$w", world.getName()).replace("$p", player.getName());
-                        player.performCommand(finalCommand);
-                    }
-                } else if (components[1].equalsIgnoreCase("f"))
-                {
-                    var7 = world.getPlayers().iterator();
-
-                    while (var7.hasNext())
-                    {
-                        player = (Player) var7.next();
-                        finalCommand = components[0].replace("$w", world.getName()).replace("$p", player.getName());
-                        Bukkit.getServer().dispatchCommand(Bukkit.getServer().getConsoleSender(), finalCommand);
-                    }
-                } else
-                {
-                    System.out.println("[Warning] Could not interpret command '" + command + "'");
-                }
-            }
-        }
-
+        RunCommands(Bloodmoon.GetInstance().getConfigReader(world).GetPreBloodMoonCommands());
     }
 
     private void RunPostCommand ()
     {
-        String[] commands = Bloodmoon.GetInstance().getConfigReader(world).GetPostBloodMoonCommands();
-        String[] var2 = commands;
-        int var3 = commands.length;
+        RunCommands(Bloodmoon.GetInstance().getConfigReader(world).GetPostBloodMoonCommands());
+    }
 
-        for (int var4 = 0; var4 < var3; ++var4)
+    /**
+     * Ejecuta comandos con el formato "comando;s", "comando;f" o "comando;p"
+     * s = consola una vez, f = consola una vez por jugador, p = el jugador lo ejecuta
+     */
+    private void RunCommands (String[] commands)
+    {
+        for (String command : commands)
         {
-            String command = var2[var4];
-            String[] components = command.split(";");
-            if (components[1].equalsIgnoreCase("s"))
+            int separator = command.lastIndexOf(';');
+            if (separator < 0)
             {
-                String finalCommand = components[0].replace("$w", world.getName());
-                Bukkit.getServer().dispatchCommand(Bukkit.getServer().getConsoleSender(), finalCommand);
-            } else
+                Compat.warn("Comando sin ';s', ';f' o ';p' al final: '" + command + "'");
+                continue;
+            }
+            String base = command.substring(0, separator).replace("$w", world.getName());
+            String mode = command.substring(separator + 1).trim();
+
+            if (mode.equalsIgnoreCase("s"))
             {
-                Iterator var7;
-                Player player;
-                String finalCommand;
-                if (components[1].equalsIgnoreCase("p"))
+                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), base);
+            }
+            else if (mode.equalsIgnoreCase("p") || mode.equalsIgnoreCase("f"))
+            {
+                for (Player player : new ArrayList<>(world.getPlayers()))
                 {
-                    var7 = world.getPlayers().iterator();
-
-                    while (var7.hasNext())
-                    {
-                        player = (Player) var7.next();
-                        finalCommand = components[0].replace("$w", world.getName()).replace("$p", player.getName());
-                        player.performCommand(finalCommand);
-                    }
-                } else if (components[1].equalsIgnoreCase("f"))
-                {
-                    var7 = world.getPlayers().iterator();
-
-                    while (var7.hasNext())
-                    {
-                        player = (Player) var7.next();
-                        finalCommand = components[0].replace("$w", world.getName()).replace("$p", player.getName());
-                        Bukkit.getServer().dispatchCommand(Bukkit.getServer().getConsoleSender(), finalCommand);
-                    }
-                } else
-                {
-                    System.out.println("[Warning] Could not interpret command '" + command + "'");
+                    String finalCommand = base.replace("$p", player.getName());
+                    if (mode.equalsIgnoreCase("p")) player.performCommand(finalCommand);
+                    else Bukkit.dispatchCommand(Bukkit.getConsoleSender(), finalCommand);
                 }
+            }
+            else
+            {
+                Compat.warn("No se pudo interpretar el comando '" + command + "'");
             }
         }
     }
@@ -361,8 +374,17 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
             Location spawn = chosenOne.getLocation();
             Location newLocation = spawn.clone();
             newLocation.add((double) (rnd.nextInt(10) + 10), 0.0D, (double) (rnd.nextInt(10) + 10));
-            newLocation.setY((double) world.getHighestBlockYAt(newLocation));
-            ZombieIBoss zombieBoss = new ZombieIBoss(newLocation);
+            newLocation.setY((double) world.getHighestBlockYAt(newLocation) + 1);
+            ZombieIBoss zombieBoss;
+            MobEnhancer.suppress = true;
+            try
+            {
+                zombieBoss = new ZombieIBoss(newLocation);
+            }
+            finally
+            {
+                MobEnhancer.suppress = false;
+            }
             zombieBoss.Start();
             bosses.add(zombieBoss);
         }
@@ -386,28 +408,19 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
 
         if (configReader.GetPermanentBloodMoonConfig()) return; //disable nightbar if permanent BM
 
-        if (configReader.GetDarkenSkyConfig())
-        {
-            nightBar = Bukkit.createBossBar(localeReader.GetLocaleString("BloodMoonTitleBar"),
-                    BarColor.RED,
-                    BarStyle.SEGMENTED_12,
-                    BarFlag.CREATE_FOG,
-                    BarFlag.DARKEN_SKY
-            );
-        } else
-        {
-            nightBar = Bukkit.createBossBar(localeReader.GetLocaleString("BloodMoonTitleBar"),
-                    BarColor.RED,
-                    BarStyle.SEGMENTED_12
-            );
-        }
-        nightBar.setProgress(0.0);
+        Component barTitle = localeReader.Get(crimson ? "CrimsonMoonTitleBar" : "BloodMoonTitleBar");
+        BossBar.Color barColor = crimson ? BossBar.Color.PURPLE : BossBar.Color.RED;
+        Set<BossBar.Flag> flags = configReader.GetDarkenSkyConfig()
+                ? EnumSet.of(BossBar.Flag.CREATE_WORLD_FOG, BossBar.Flag.DARKEN_SCREEN)
+                : EnumSet.noneOf(BossBar.Flag.class);
+        HideNightBar();
+        nightBar = BossBar.bossBar(barTitle, 0.0f, barColor, BossBar.Overlay.NOTCHED_12, flags);
         Bloodmoon.GetInstance().GetScheduler().runTaskLater(Bloodmoon.GetInstance(), this, 0);
 
         List<Player> players = world.getPlayers();
         for (Player player : players)
         {
-            nightBar.addPlayer(player);
+            ShowNightBarPlayer(player);
         }
 
         UpdateNightBar();
@@ -416,25 +429,36 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
 
     private void HideNightBar ()
     {
-        if (nightBar != null) nightBar.removeAll();
+        if (nightBar != null)
+        {
+            for (UUID uuid : barViewers)
+            {
+                Player player = Bukkit.getPlayer(uuid);
+                if (player != null) player.hideBossBar(nightBar);
+            }
+        }
+        barViewers.clear();
         nightBar = null;
+    }
+
+    private void ShowNightBarPlayer (Player player)
+    {
+        if (nightBar == null) return;
+        player.showBossBar(nightBar);
+        barViewers.add(player.getUniqueId());
     }
 
     private void HideNightBarPlayer (Player player)
     {
-        try
-        {
-            if (nightBar != null) nightBar.removePlayer(player);
-        } catch (Exception ignored)
-        {
-        }
+        if (nightBar != null) player.hideBossBar(nightBar);
+        barViewers.remove(player.getUniqueId());
     }
 
     private void UpdateNightBar ()
     {
         if (Bloodmoon.GetInstance().getConfigReader(world).GetPermanentBloodMoonConfig())
         {
-            if (nightBar != null) nightBar.setProgress(1.0);
+            if (nightBar != null) nightBar.progress(1.0f);
             return;
         }
         long timeTotal = 12000;
@@ -443,13 +467,179 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
 
         double percent = (double) timeLeft / (double) timeTotal;
 
-        if (nightBar != null && percent >= 0.0 && percent <= 1.0f) nightBar.setProgress(1.0 - percent);
+        if (nightBar != null && percent >= 0.0 && percent <= 1.0f) nightBar.progress((float) (1.0 - percent));
     }
 
     private void HandleReconnectingPlayer (Player player)
     {
-        if (isInProgress() && nightBar != null) nightBar.addPlayer(player);
+        if (isInProgress() && nightBar != null) ShowNightBarPlayer(player);
         BroadcastBloodMoonWarningPlayer(player);
+    }
+
+    //=================================== Ambiente ===================================
+
+    private void ShowStartEffects (Player player)
+    {
+        ConfigReader reader = Bloodmoon.GetInstance().getConfigReader(world);
+        LocaleReader locales = Bloodmoon.GetInstance().getLocaleReader();
+
+        if (reader.GetBool(ConfigReader.START_TITLE, true))
+        {
+            player.showTitle(Title.title(
+                    locales.Get(crimson ? "CrimsonStartTitle" : "StartTitle"),
+                    locales.Get(crimson ? "CrimsonStartSubtitle" : "StartSubtitle"),
+                    Title.Times.times(java.time.Duration.ofMillis(500), java.time.Duration.ofMillis(3500), java.time.Duration.ofSeconds(1))));
+        }
+
+        String sound = reader.GetString(ConfigReader.START_SOUND, "entity.wither.spawn").trim();
+        if (!sound.isEmpty() && !sound.equalsIgnoreCase("none"))
+        {
+            // La version con String acepta ids de Minecraft (y de resource packs) en cualquier version
+            player.playSound(player.getLocation(), sound.toLowerCase(Locale.ROOT), 1.0f, crimson ? 0.6f : 0.8f);
+        }
+    }
+
+    private void StartAmbience ()
+    {
+        StopAmbience();
+        ConfigReader reader = Bloodmoon.GetInstance().getConfigReader(world);
+        if (!reader.GetBool(ConfigReader.AMBIENT_PARTICLES, true)) return;
+
+        int amount = Math.max(0, reader.GetInt(ConfigReader.AMBIENT_PARTICLE_AMOUNT, 6));
+        if (amount == 0) return;
+
+        Particle.DustOptions dust = new Particle.DustOptions(crimson ? Color.fromRGB(90, 0, 40) : Color.fromRGB(150, 0, 0), 1.6f);
+        ambientTask = Bloodmoon.GetInstance().GetScheduler().scheduleSyncRepeatingTask(Bloodmoon.GetInstance(), () ->
+        {
+            if (!isInProgress())
+            {
+                StopAmbience();
+                return;
+            }
+            for (Player player : world.getPlayers())
+            {
+                player.spawnParticle(Compat.DUST_RED, player.getLocation().add(0, 1.5, 0), amount, 6, 3, 6, 0, dust);
+            }
+        }, 10L, 10L);
+    }
+
+    private void StopAmbience ()
+    {
+        if (ambientTask != -1)
+        {
+            Bloodmoon.GetInstance().GetScheduler().cancelTask(ambientTask);
+            ambientTask = -1;
+        }
+    }
+
+    //=================================== Kills y premios ===================================
+
+    public int GetKills (UUID player)
+    {
+        return kills.getOrDefault(player, 0);
+    }
+
+    /**
+     * @return jugadores ordenados por kills, de mayor a menor
+     */
+    public List<Map.Entry<UUID, Integer>> GetRanking ()
+    {
+        List<Map.Entry<UUID, Integer>> ranking = new ArrayList<>(kills.entrySet());
+        ranking.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+        return ranking;
+    }
+
+    /**
+     * @return posicion del jugador en el ranking (1 = primero) o 0 si no tiene kills
+     */
+    public int GetRank (UUID player)
+    {
+        List<Map.Entry<UUID, Integer>> ranking = GetRanking();
+        for (int i = 0; i < ranking.size(); i++)
+        {
+            if (ranking.get(i).getKey().equals(player)) return i + 1;
+        }
+        return 0;
+    }
+
+    private static String NameOf (UUID uuid)
+    {
+        String name = Bukkit.getOfflinePlayer(uuid).getName();
+        return name == null ? uuid.toString() : name;
+    }
+
+    private void HandleKillRewards ()
+    {
+        if (!inProgress) return;
+        ConfigReader reader = Bloodmoon.GetInstance().getConfigReader(world);
+        if (!reader.GetBool(ConfigReader.KILL_RANKING_ENABLED, true)) return;
+
+        List<Map.Entry<UUID, Integer>> ranking = GetRanking();
+        if (ranking.isEmpty())
+        {
+            LocaleReader.MessageAllLocale("KillRankingEmpty", null, null, world);
+            return;
+        }
+
+        int shown = Math.min(ranking.size(), Math.max(0, reader.GetInt(ConfigReader.KILL_RANKING_SIZE, 3)));
+        if (shown > 0)
+        {
+            LocaleReader.MessageAllLocale("KillRankingHeader", null, null, world);
+            for (int i = 0; i < shown; i++)
+            {
+                Map.Entry<UUID, Integer> entry = ranking.get(i);
+                LocaleReader.MessageAllLocale("KillRankingLine", new String[]{"$r", "$p", "$k"},
+                        new String[]{String.valueOf(i + 1), NameOf(entry.getKey()), String.valueOf(entry.getValue())}, world);
+            }
+        }
+
+        int minimum = Math.max(0, reader.GetInt(ConfigReader.KILL_REWARD_MINIMUM_KILLS, 5));
+
+        for (String line : reader.GetStringList(ConfigReader.KILL_REWARD_TOP_COMMANDS))
+        {
+            int separator = line.indexOf(';');
+            if (separator < 0)
+            {
+                Compat.warn("KillRewardTopCommands necesita el formato \"[POSICION];[COMANDO]\": '" + line + "'");
+                continue;
+            }
+            int position;
+            try
+            {
+                position = Integer.parseInt(line.substring(0, separator).trim());
+            }
+            catch (NumberFormatException e)
+            {
+                Compat.warn("Posicion invalida en KillRewardTopCommands: '" + line + "'");
+                continue;
+            }
+            if (position < 1 || position > ranking.size()) continue;
+            Map.Entry<UUID, Integer> entry = ranking.get(position - 1);
+            if (entry.getValue() < minimum) continue;
+            RunRewardCommand(line.substring(separator + 1), entry);
+        }
+
+        List<String> participation = reader.GetStringList(ConfigReader.KILL_REWARD_PARTICIPATION_COMMANDS);
+        for (Map.Entry<UUID, Integer> entry : ranking)
+        {
+            if (entry.getValue() < minimum) continue;
+            for (String command : participation) RunRewardCommand(command, entry);
+
+            Player online = Bukkit.getPlayer(entry.getKey());
+            if (online != null)
+                LocaleReader.MessageLocale("KillRewardReceived", new String[]{"$k"}, new String[]{String.valueOf(entry.getValue())}, online);
+        }
+    }
+
+    private void RunRewardCommand (String command, Map.Entry<UUID, Integer> entry)
+    {
+        String finalCommand = command.trim()
+                .replace("$p", NameOf(entry.getKey()))
+                .replace("$k", String.valueOf(entry.getValue()))
+                .replace("$w", world.getName());
+        if (finalCommand.startsWith("/")) finalCommand = finalCommand.substring(1);
+        if (finalCommand.isEmpty()) return;
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), finalCommand);
     }
 
     private void BroadcastBloodMoonWarning ()
@@ -467,6 +657,7 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
 
         LocaleReader.MessageLocale("BloodMoonWarningTitle", null, null, player);
         LocaleReader.MessageLocale("BloodMoonWarningBody", null, null, player);
+        if (crimson) LocaleReader.MessageLocale("CrimsonMoonWarning", null, null, player);
 
         if (configReader.GetInventoryLossConfig())
         {
@@ -485,76 +676,119 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
      */
     public ItemStack GetRandomBonus ()
     {
-
-        Random random = new Random(); //We want to regenerate it every time to ensure randomness
-        Material itemMaterial;
-
         ConfigReader configReader = Bloodmoon.GetInstance().getConfigReader(world);
         String[] items = configReader.GetItemListConfig();
-        Map<String, Integer[]> indexes = new HashMap<>();
+
+        List<String> entries = new ArrayList<>();
+        List<Integer> weights = new ArrayList<>();
         int totalWeight = 0;
 
         for (String entry : items)
         {
             String[] parts = entry.split(":");
-            int itemWeight = Integer.parseInt(parts[2]);
-
-            indexes.put(entry, new Integer[]{totalWeight, totalWeight + itemWeight});
-            totalWeight += itemWeight;
-        }
-
-        int rng = random.nextInt(totalWeight);
-
-        for (Map.Entry<String, Integer[]> entry : indexes.entrySet())
-        {
-            int min = entry.getValue()[0];
-            int max = entry.getValue()[1];
-
-            if (rng >= min && rng < max)
+            if (parts.length < 3) continue;
+            try
             {
-                String[] parts = entry.getKey().split(":");
-                itemMaterial = Material.valueOf(parts[0]);
-
-                ItemStack itemStack = new ItemStack(itemMaterial, Integer.parseInt(parts[1]));
-
-                for (int i = 3; i < 6; i++)
-                {
-                    if (parts.length <= i) break;
-
-                    String line = parts[i];
-                    if (line.startsWith("$name"))
-                    {
-                        line = line.substring("$name".length() + 1);
-
-                        ItemMeta meta = itemStack.getItemMeta();
-                        meta.setDisplayName(line);
-                        itemStack.setItemMeta(meta);
-                    } else if (line.startsWith("$desc"))
-                    {
-                        line = line.substring("$desc".length() + 1);
-
-                        ItemMeta meta = itemStack.getItemMeta();
-                        meta.setLore(Arrays.asList(line.split("\\$n")));
-                        itemStack.setItemMeta(meta);
-                    } else if (line.startsWith("$enchant"))
-                    {
-                        line = line.substring("$enchant".length() + 1);
-
-                        String[] enchantLines = line.split(";");
-                        for (String enchantLine : enchantLines)
-                        {
-                            String[] enchant = enchantLine.split(",");
-                            itemStack.addEnchantment(
-                                    Enchantment.getByKey(NamespacedKey.minecraft(enchant[0].toLowerCase()))
-                                    , Integer.parseInt(enchant[1]));
-                        }
-                    }
-                }
-
-                return itemStack;
+                int itemWeight = Integer.parseInt(parts[2].trim());
+                if (itemWeight <= 0) continue;
+                entries.add(entry);
+                weights.add(itemWeight);
+                totalWeight += itemWeight;
+            }
+            catch (NumberFormatException e)
+            {
+                Compat.warn("Peso invalido en DropItemList: '" + entry + "'");
             }
         }
+
+        if (totalWeight <= 0) return null;
+
+        int rng = new Random().nextInt(totalWeight);
+        for (int i = 0; i < entries.size(); i++)
+        {
+            rng -= weights.get(i);
+            if (rng < 0) return ParseItem(entries.get(i));
+        }
         return null;
+    }
+
+    /**
+     * Convierte una linea "MATERIAL:CANTIDAD:PESO[:$name ...][:$desc ...][:$enchant ...]" en un ItemStack
+     */
+    public static ItemStack ParseItem (String entry)
+    {
+        // MATERIAL:CANTIDAD:PESO y despues secciones ":$name", ":$desc", ":$enchant" que pueden contener ':'
+        String[] head = entry.split(":(?=\\$(name|desc|enchant))");
+        String[] base = head[0].split(":", 3);
+        String[] parts = new String[3 + head.length - 1];
+        for (int i = 0; i < 3; i++) parts[i] = i < base.length ? base[i] : "1";
+        System.arraycopy(head, 1, parts, 3, head.length - 1);
+        Material itemMaterial = Compat.material(parts[0]);
+        if (itemMaterial == null || !itemMaterial.isItem())
+        {
+            Compat.warn("Material desconocido en DropItemList: '" + parts[0] + "'");
+            return null;
+        }
+
+        int amount = 1;
+        try
+        {
+            if (parts.length > 1) amount = Math.max(1, Integer.parseInt(parts[1].trim()));
+        }
+        catch (NumberFormatException ignored) {}
+
+        ItemStack itemStack = new ItemStack(itemMaterial, amount);
+
+        for (int i = 3; i < parts.length; i++)
+        {
+            String line = parts[i];
+            if (line.startsWith("$name"))
+            {
+                line = line.substring(Math.min(line.length(), "$name".length() + 1));
+
+                ItemMeta meta = itemStack.getItemMeta();
+                if (meta == null) continue;
+                meta.displayName(Text.Item(line.trim()));
+                itemStack.setItemMeta(meta);
+            }
+            else if (line.startsWith("$desc"))
+            {
+                line = line.substring(Math.min(line.length(), "$desc".length() + 1));
+
+                ItemMeta meta = itemStack.getItemMeta();
+                if (meta == null) continue;
+                List<Component> lore = new ArrayList<>();
+                for (String loreLine : line.split("\\$n|<newline>|<br>")) lore.add(Text.Item(loreLine.trim()));
+                meta.lore(lore);
+                itemStack.setItemMeta(meta);
+            }
+            else if (line.startsWith("$enchant"))
+            {
+                line = line.substring(Math.min(line.length(), "$enchant".length() + 1));
+
+                for (String enchantLine : line.split(";"))
+                {
+                    if (enchantLine.trim().isEmpty()) continue;
+                    String[] enchant = enchantLine.split(",");
+                    Enchantment enchantment = Compat.enchantment(enchant[0]);
+                    if (enchantment == null)
+                    {
+                        Compat.warn("Encantamiento desconocido en DropItemList: '" + enchant[0] + "'");
+                        continue;
+                    }
+                    int level = 1;
+                    try
+                    {
+                        if (enchant.length > 1) level = Integer.parseInt(enchant[1].trim());
+                    }
+                    catch (NumberFormatException ignored) {}
+                    // unsafe permite niveles por encima del maximo vanilla y encantar cualquier item
+                    itemStack.addUnsafeEnchantment(enchantment, level);
+                }
+            }
+        }
+
+        return itemStack;
     }
 
     public boolean IsInProtectedWGRegion (Player player){
@@ -601,20 +835,23 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
 
 
             String[] parts = str.split(",");
-            PotionEffectType[] types = PotionEffectType.values();
-            String effectName = parts[0];
-            int ticks = (int) (20f * Float.parseFloat(parts[1]));
-            int amp = Integer.parseInt(parts[2]);
-
-            for (PotionEffectType type : types)
+            if (parts.length < 3)
             {
-                if (type.getName().equals(effectName))
-                {
-                    player.addPotionEffect(new PotionEffect(type, ticks, amp));
-                    break;
-                }
+                Compat.warn("Efecto mal escrito en " + mobTypeName + "Effects: '" + str + "'");
+                continue;
             }
-            //Effect not found. Meh
+            PotionEffectType type = Compat.potionOrWarn(parts[0], mobTypeName + "Effects");
+            if (type == null) continue;
+            try
+            {
+                int ticks = (int) (20f * Float.parseFloat(parts[1].trim()));
+                int amp = Integer.parseInt(parts[2].trim());
+                player.addPotionEffect(new PotionEffect(type, ticks, amp));
+            }
+            catch (NumberFormatException e)
+            {
+                Compat.warn("Numero invalido en " + mobTypeName + "Effects: '" + str + "'");
+            }
         }
     }
 
@@ -626,6 +863,27 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
 
 
     //Events
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onCreatureSpawn (CreatureSpawnEvent event)
+    {
+        if (event.getEntity().getWorld() != world || !isInProgress()) return;
+        if (!ENHANCED_REASONS.contains(event.getSpawnReason())) return;
+
+        LivingEntity entity = event.getEntity();
+        boolean eligible = false;
+        for (EntityType type : rewardedTypes)
+        {
+            if (entity.getType() == type)
+            {
+                eligible = true;
+                break;
+            }
+        }
+        if (!eligible) return;
+
+        MobEnhancer.Enhance(entity, Bloodmoon.GetInstance().getConfigReader(world), GetDifficultyMultiplier());
+    }
+
     @EventHandler
     public void onPlayerConnect (PlayerJoinEvent event)
     {
@@ -692,13 +950,13 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
 
         if (configReader.GetLightningEffectConfig()) world.strikeLightningEffect(deadplayer.getLocation());
 
-        String deathMessage = event.getDeathMessage();
+        Component deathMessage = event.deathMessage();
+        Component suffix = localeReader.Get("DeathSuffix", null, null);
 
-        if (!deathMessage.contains(localeReader.GetLocaleString("DeathSuffix")))
+        // deathMessage() es null si el servidor u otro plugin desactivo los mensajes de muerte
+        if (deathMessage != null && suffix != null && !Text.Plain(deathMessage).contains(Text.Plain(suffix)))
         {
-            deathMessage += " " + localeReader.GetLocaleString("DeathSuffix");
-
-            event.setDeathMessage(deathMessage);
+            event.deathMessage(deathMessage.append(Component.space()).append(suffix));
         }
 
         if (configReader.GetExperienceLossConfig())
@@ -764,7 +1022,7 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
                 if (killer != null)
                 {
 
-                    LocaleReader.MessageAllLocale("BossSlain", new String[]{"$b", "$p"}, new String[]{boss.GetName(), killer.getName()}, world);
+                    LocaleReader.MessageAllLocale("BossSlain", new String[]{"$b", "$p"}, new Object[]{boss.GetName(), killer.getName()}, world);
                 }
 
                 boss.Kill(killer != null && isInProgress());
@@ -797,7 +1055,11 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
 
         if (!eligible) return; //Not eligible for reward
 
-        event.setDroppedExp(event.getDroppedExp() * configReader.GetExpMultConfig());
+        double difficulty = GetDifficultyMultiplier();
+        event.setDroppedExp((int) Math.round(event.getDroppedExp() * configReader.GetExpMultConfig() * difficulty));
+
+        Player killer = entity.getKiller();
+        if (killer != null) kills.merge(killer.getUniqueId(), 1, Integer::sum);
 
         if (configReader.GetMobDeathThunderConfig())
             world.strikeLightningEffect(event.getEntity().getLocation());
@@ -807,11 +1069,12 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
         int min = configReader.GetMinItemsDropConfig();
         int max = configReader.GetMaxItemsDropConfig();
 
-        int itemCount = (max - min <= 0) ? min : new Random().nextInt(max - min) + min;
+        int itemCount = (int) Math.round(Compat.randomBetween(min, max) * difficulty);
 
         for (int i = 0; i < itemCount; i++)
         {
-            bonusDrops.add(GetRandomBonus()); //Add the drops
+            ItemStack bonus = GetRandomBonus();
+            if (bonus != null) bonusDrops.add(bonus);
         }
 
         for (ItemStack item : bonusDrops)
@@ -851,7 +1114,7 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
                         //Player is damaged by monster
                         if (event.getFinalDamage() == 0 && configReader.GetShieldPreventEffects())
                             return; //Hit was shielded. We shall not apply configs
-                        event.setDamage(event.getDamage() * configReader.GetMobDamageMultConfig());
+                        event.setDamage(event.getDamage() * configReader.GetMobDamageMultConfig() * GetDifficultyMultiplier());
                         ApplySpecialEffect((Player) receiver, (LivingEntity) damager);
                         if (configReader.GetPlayerDamageSoundConfig())
                             ((Player) receiver).playSound(receiver.getLocation(), Sound.AMBIENT_CAVE, 80.0f, 1.5f);
@@ -866,9 +1129,9 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
                     if (receiver.getType() == type)
                     {
                         //Player dealt damage to monster
-                        event.setDamage((int) Math.ceil(event.getDamage() / configReader.GetMobHealthMultConfig()));
+                        event.setDamage((int) Math.ceil(event.getDamage() / (configReader.GetMobHealthMultConfig() * GetDifficultyMultiplier())));
                         if (configReader.GetMobHitParticleConfig())
-                            world.spawnParticle(Particle.CRIT_MAGIC, receiver.getLocation(), 60);
+                            world.spawnParticle(Compat.CRIT_MAGIC, receiver.getLocation(), 60);
 
                     }
                 }

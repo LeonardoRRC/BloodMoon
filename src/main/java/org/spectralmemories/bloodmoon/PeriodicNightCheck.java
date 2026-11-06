@@ -213,8 +213,8 @@ public class PeriodicNightCheck implements Runnable, Listener
             if (world.getTime() < 12000)
             {
 
-                actuator.StopBloodMoon();
                 LocaleReader.MessageAllLocale("BloodMoonEndingMessage", null, null, world);
+                actuator.StopBloodMoon();
                 for (Player player : world.getPlayers())
                 {
                     if (configReader.GetBloodMoonEndSoundConfig())

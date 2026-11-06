@@ -176,6 +176,7 @@ public class ConfigReader implements Closeable
             writer.write("#List of items that can drop, using the\n");
             writer.write("#\"[ITEM_CODE]:[STACK AMOUNT]:[WEIGHT]:$name [META NAME]:$desc [META DESCRIPTION]:$enchant [ENCHANTMENT LIST]\" format\n");
             writer.write("#$name, $desc and $enchant are of course optional\n");
+            writer.write("#$name and $desc accept MiniMessage (<gradient:#ff0000:#ffaa00>, <bold>...) and old & color codes. Use $n for a new lore line\n");
             writer.write("#The enchantment list argument is formatted as follow: \"$enchant [ENCHANT NAME],[LEVEL];\"\n");
             writer.write("#The percent chance of an item dropping is equal to [item weight] / [total weight] * 100\n");
             writer.write("#Please refer to https://hub.spigotmc.org/javadocs/spigot/org/bukkit/Material.html for the list of items\n");
@@ -203,6 +204,7 @@ public class ConfigReader implements Closeable
             writer.write("#Mob effects on hit. Format (with no spaces in between):\n");
             writer.write("#[Effect],[Duration in seconds],[Effect amplifier. Use 1 if you're unsure]\n");
             writer.write("#For a complete list of effects, refert to https://hub.spigotmc.org/javadocs/spigot/org/bukkit/potion/PotionEffectType.html\n");
+            writer.write("#Old Bukkit names (SLOW, CONFUSION, INCREASE_DAMAGE...) are still accepted\n");
             writer.write("#Additional effects include: 'LIGHTNING'\n");
             writer.write(ZOMBIEEFFECTS + ":\n");
             writer.write("  - \"WITHER,7,1\"\n");
@@ -213,16 +215,16 @@ public class ConfigReader implements Closeable
             writer.write(ZOMBIE_VILLAGEREFFECT + ":\n");
             writer.write("  - \"WITHER,7,1\"\n");
             writer.write(SKELETONEFFECTS + ":\n");
-            writer.write("  - \"SLOW,3.5,1\"\n");
+            writer.write("  - \"SLOWNESS,3.5,1\"\n");
             writer.write(CREEPEREFFECTS + ":\n");
             writer.write("  - \"LIGHTNING\"\n");
             writer.write(PHANTOMEFFECTS + ":\n");
             writer.write("  - \"LEVITATION,1.5,3\"\n");
             writer.write(SPIDEREFFECTS + ":\n");
             writer.write("  - \"POISON,4,1\"\n");
-            writer.write("  - \"CONFUSION,6,9999\"\n");
+            writer.write("  - \"NAUSEA,6,9999\"\n");
             writer.write("ENDERMANEffects:\n");
-            writer.write("  - \"SLOW,2.5,2\"\n");
+            writer.write("  - \"SLOWNESS,2.5,2\"\n");
             writer.write("ZOMBIEBOSSEffects:\n");
             writer.write("  - \"WITHER,9,2\"\n");
             writer.write("\n#These commands will be ran right as a BloodMoon starts\n");
@@ -255,7 +257,7 @@ public class ConfigReader implements Closeable
             writer.write(HORDE_MIN_POPULATION + ": " + String.valueOf(HORDE_MIN_POPULATION_DEFAULT) + "\n");
             writer.write("#The maximum number of mobs in a horde\n");
             writer.write(HORDE_MAX_POPULATION + ": " + String.valueOf(HORDE_MAX_POPULATION_DEFAULT) + "\n");
-
+            writer.write(FEATURES_09_BLOCK);
 
             writer.close();
         }
@@ -270,6 +272,7 @@ public class ConfigReader implements Closeable
     {
         if (GetIsBlacklistedConfig()) return; //skip others
 
+        EnsureFeatureBlock();
         GetExperienceLossConfig();
         GetInventoryLossConfig();
         GetIntervalConfig();
@@ -1030,6 +1033,170 @@ public class ConfigReader implements Closeable
     //============================================================================================================
 
 
+    //============================================================================================================
+    // 0.9: claves nuevas. Se leen con los helpers genericos de abajo; si faltan en un config viejo,
+    // EnsureFeatureBlock() agrega el bloque completo con sus comentarios.
+
+    public static final String ENHANCED_MOBS_ENABLED = "EnhancedMobsEnabled";
+    public static final String ENHANCED_MOBS_HEALTH = "EnhancedMobsHealthMultiplier";
+    public static final String ENHANCED_MOBS_SPEED = "EnhancedMobsSpeedMultiplier";
+    public static final String ENHANCED_MOBS_ARMOR_CHANCE = "EnhancedMobsArmorChance";
+    public static final String ENHANCED_MOBS_ARMOR_TIERS = "EnhancedMobsArmorTiers";
+    public static final String ENHANCED_MOBS_WEAPON_CHANCE = "EnhancedMobsWeaponChance";
+    public static final String ENHANCED_MOBS_WEAPONS = "EnhancedMobsWeapons";
+    public static final String ENHANCED_MOBS_ENCHANT_CHANCE = "EnhancedMobsEnchantChance";
+    public static final String ENHANCED_MOBS_GEAR_DROP_CHANCE = "EnhancedMobsGearDropChance";
+
+    public static final String CRIMSON_MOON_CHANCE = "CrimsonMoonChance";
+    public static final String CRIMSON_MOON_MULTIPLIER = "CrimsonMoonMultiplier";
+    public static final String COMMANDS_ON_CRIMSON_START = "CommandsOnCrimsonStart";
+
+    public static final String KILL_RANKING_ENABLED = "KillRankingEnabled";
+    public static final String KILL_RANKING_SIZE = "KillRankingSize";
+    public static final String KILL_REWARD_MINIMUM_KILLS = "KillRewardMinimumKills";
+    public static final String KILL_REWARD_TOP_COMMANDS = "KillRewardTopCommands";
+    public static final String KILL_REWARD_PARTICIPATION_COMMANDS = "KillRewardParticipationCommands";
+
+    public static final String START_TITLE = "StartTitle";
+    public static final String START_SOUND = "StartSound";
+    public static final String AMBIENT_PARTICLES = "AmbientParticles";
+    public static final String AMBIENT_PARTICLE_AMOUNT = "AmbientParticleAmount";
+
+    public static final String FEATURES_09_BLOCK =
+            "\n#==================== Added in 0.9 ====================\n" +
+            "\n#--- Enhanced mobs: monsters that spawn during a BloodMoon get stronger ---\n" +
+            "#Spawner mobs and boss minions are never enhanced\n" +
+            ENHANCED_MOBS_ENABLED + ": true\n" +
+            "#Multiplies the real max health of the mob (1.0 = vanilla). Stacks with MobHealthMultiplicator\n" +
+            ENHANCED_MOBS_HEALTH + ": 1.0\n" +
+            "#Multiplies the movement speed of the mob (1.0 = vanilla)\n" +
+            ENHANCED_MOBS_SPEED + ": 1.15\n" +
+            "#Chance (0.0 to 1.0) that a zombie or skeleton type mob spawns wearing armor\n" +
+            ENHANCED_MOBS_ARMOR_CHANCE + ": 0.35\n" +
+            "#Armor tiers with their weight: [TIER]:[WEIGHT]. Tiers: LEATHER, CHAINMAIL, IRON, GOLDEN, DIAMOND, NETHERITE\n" +
+            ENHANCED_MOBS_ARMOR_TIERS + ":\n" +
+            "  - \"CHAINMAIL:5\"\n" +
+            "  - \"IRON:4\"\n" +
+            "  - \"DIAMOND:1\"\n" +
+            "#Chance (0.0 to 1.0) that a zombie type mob gets a weapon from the list, or that a skeleton gets an enchanted bow\n" +
+            ENHANCED_MOBS_WEAPON_CHANCE + ": 0.25\n" +
+            "#Weapons for zombie type mobs with their weight: [ITEM]:[WEIGHT]\n" +
+            ENHANCED_MOBS_WEAPONS + ":\n" +
+            "  - \"IRON_SWORD:5\"\n" +
+            "  - \"IRON_AXE:3\"\n" +
+            "  - \"DIAMOND_SWORD:1\"\n" +
+            "#Chance (0.0 to 1.0) that each armor piece or weapon is enchanted (protection / sharpness / power I to III)\n" +
+            ENHANCED_MOBS_ENCHANT_CHANCE + ": 0.25\n" +
+            "#Chance (0.0 to 1.0) that the mob drops its gear when killed. Keep it at 0 to avoid armor farming\n" +
+            ENHANCED_MOBS_GEAR_DROP_CHANCE + ": 0.0\n" +
+            "\n#--- Crimson Moon: a rarer and harder BloodMoon ---\n" +
+            "#Chance (0 to 100) that a BloodMoon turns into a Crimson Moon. 0 disables it\n" +
+            "#Admins can force one with /bloodmoon start crimson\n" +
+            CRIMSON_MOON_CHANCE + ": 15\n" +
+            "#Multiplies mob damage, mob toughness, experience, item drops and the enhanced mobs chances\n" +
+            CRIMSON_MOON_MULTIPLIER + ": 1.5\n" +
+            "#Extra commands run when a Crimson Moon starts, after CommandsOnStart. Same format as CommandsOnStart\n" +
+            COMMANDS_ON_CRIMSON_START + ":\n" +
+            "#  - \"broadcast A Crimson Moon rises over $w;s\"\n" +
+            "\n#--- Kill ranking and rewards ---\n" +
+            "#Counts the monsters each player kills during the BloodMoon and rewards the best ones when it ends\n" +
+            "#Does nothing in worlds with PermanentBloodMoon, since that BloodMoon never ends\n" +
+            KILL_RANKING_ENABLED + ": true\n" +
+            "#How many players are shown in the ranking when the BloodMoon ends\n" +
+            KILL_RANKING_SIZE + ": 3\n" +
+            "#Minimum kills needed to get any reward\n" +
+            KILL_REWARD_MINIMUM_KILLS + ": 5\n" +
+            "#Commands for the top players, run from the console: \"[POSITION];[COMMAND]\"\n" +
+            "#$p = player name, $k = kills, $w = world. Several commands can share a position\n" +
+            KILL_REWARD_TOP_COMMANDS + ":\n" +
+            "  - \"1;give $p diamond 5\"\n" +
+            "  - \"2;give $p diamond 3\"\n" +
+            "  - \"3;give $p diamond 1\"\n" +
+            "#Commands run from the console for every player who reached the minimum kills. Same placeholders\n" +
+            KILL_REWARD_PARTICIPATION_COMMANDS + ":\n" +
+            "  - \"give $p iron_ingot 8\"\n" +
+            "\n#--- Ambience ---\n" +
+            "#Shows a title on screen when the BloodMoon starts\n" +
+            START_TITLE + ": true\n" +
+            "#Sound played to every player in the world when it starts. Minecraft sound id, or \"none\"\n" +
+            START_SOUND + ": \"entity.wither.spawn\"\n" +
+            "#Red particles floating around players during the BloodMoon\n" +
+            AMBIENT_PARTICLES + ": true\n" +
+            "#Particles per player every half second\n" +
+            AMBIENT_PARTICLE_AMOUNT + ": 6\n";
+
+    /**
+     * Agrega las claves de 0.9 a un config creado con una version anterior
+     */
+    public void EnsureFeatureBlock ()
+    {
+        if (Raw(ENHANCED_MOBS_ENABLED) != null) return;
+        try (FileWriter writer = new FileWriter(configFile, true))
+        {
+            writer.append(FEATURES_09_BLOCK);
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
+        }
+        RefreshConfigs();
+    }
+
+    private Object Raw (String key)
+    {
+        try
+        {
+            return GetConfig(key);
+        }
+        catch (FileNotFoundException e)
+        {
+            return null;
+        }
+    }
+
+    public boolean GetBool (String key, boolean def)
+    {
+        Object value = Raw(key);
+        return value instanceof Boolean ? (Boolean) value : def;
+    }
+
+    public int GetInt (String key, int def)
+    {
+        Object value = Raw(key);
+        return value instanceof Number ? ((Number) value).intValue() : def;
+    }
+
+    public double GetDouble (String key, double def)
+    {
+        Object value = Raw(key);
+        return value instanceof Number ? ((Number) value).doubleValue() : def;
+    }
+
+    public String GetString (String key, String def)
+    {
+        Object value = Raw(key);
+        return value == null ? def : String.valueOf(value);
+    }
+
+    public java.util.List<String> GetStringList (String key)
+    {
+        Object value = Raw(key);
+        java.util.List<String> result = new ArrayList<>();
+        if (value instanceof java.util.List)
+        {
+            for (Object entry : (java.util.List<?>) value)
+            {
+                if (entry != null) result.add(String.valueOf(entry));
+            }
+        }
+        return result;
+    }
+
+    public double GetCrimsonMultiplier ()
+    {
+        return Math.max(1.0, GetDouble(CRIMSON_MOON_MULTIPLIER, 1.5));
+    }
+
     private void CreateConfig (String config, String value) throws FileNotFoundException
     {
         String finalString = config + ": " + value + "\n";
@@ -1057,6 +1224,7 @@ public class ConfigReader implements Closeable
             InputStream inputStream = new FileInputStream (configFile);
 
             cache = yaml.load(inputStream);
+            if (cache == null) cache = new HashMap<>();
             try
             {
                 inputStream.close();

@@ -50,6 +50,17 @@ public final class Bloodmoon extends JavaPlugin
 
     private static WorldManager worldManager;
 
+    private org.bukkit.NamespacedKey bossKey;
+
+    /**
+     * Marca persistente que llevan los jefes, para reconocerlos aunque cambie su nombre en locales.yml
+     */
+    public org.bukkit.NamespacedKey BossKey ()
+    {
+        if (bossKey == null) bossKey = new org.bukkit.NamespacedKey(this, "boss");
+        return bossKey;
+    }
+
     /**
      * Returns the Bloodmoon instance
      * This method has a very low latency
@@ -278,7 +289,15 @@ public final class Bloodmoon extends JavaPlugin
 
         getServer().getPluginManager().registerEvents (worldManager, this);
 
-        getCommand("bloodmoon").setExecutor(new BloodmoonCommandExecutor());
+        BloodmoonCommandExecutor commandExecutor = new BloodmoonCommandExecutor();
+        getCommand("bloodmoon").setExecutor(commandExecutor);
+        getCommand("bloodmoon").setTabCompleter(commandExecutor);
+
+        if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null)
+        {
+            new BloodMoonExpansion(this).register();
+            getLogger().info("PlaceholderAPI found: %bloodmoon_...% placeholders registered");
+        }
 
 
         getCommand("testsuite").setExecutor(new TestCommandExecutor());
@@ -328,14 +347,13 @@ public final class Bloodmoon extends JavaPlugin
      * @param world Chosen world
      */
     private void PurgeBosses (World world){
+        String bossName = Text.Plain(getLocaleReader().Get("ZombieBossName"));
         for(LivingEntity entity : world.getLivingEntities()){
-            if(
-                    entity.getCustomName() != null
-                    && !entity.getCustomName().isEmpty()
-                    && entity.getCustomName().equals(getLocaleReader().GetLocaleString("ZombieBossName"))
-            ){
-                entity.remove();
-            }
+            boolean tagged = entity.getPersistentDataContainer().has(BossKey(), org.bukkit.persistence.PersistentDataType.BYTE);
+            // Jefes de versiones anteriores a 0.9: no tienen la marca, se reconocen por el nombre
+            boolean legacyName = entity.customName() != null && !bossName.isEmpty()
+                    && Text.Plain(entity.customName()).equals(bossName);
+            if (tagged || legacyName) entity.remove();
         }
     }
 
@@ -352,7 +370,7 @@ public final class Bloodmoon extends JavaPlugin
 
         for (BloodmoonActuator actuator : actuators)
         {
-            if (actuator.isInProgress()) actuator.StopBloodMoon();
+            if (actuator.isInProgress()) actuator.StopBloodMoon(false);
             actuator.close();
         }
 
@@ -384,7 +402,7 @@ public final class Bloodmoon extends JavaPlugin
 
     private void CheckOlderConfigs ()
     {
-        getLogger().log(Level.INFO,"This plugin is still in its infancy. If you encounter a bug, please report it to https://www.spigotmc.org/threads/bloodmoon.412741/");
+        getLogger().log(Level.INFO,"Unofficial continuation of BloodMoon by SpectralMemories. Do not report bugs of this version to the original author");
 
         File oldConfig = new File (getDataFolder() + SLASH + CONFIG_FILE);
         if (oldConfig.exists()) getLogger().log(Level.WARNING,"[Deprecated] BloodMoon/config.yml is no longer used. Use per-world configuration instead");

@@ -38,9 +38,10 @@ public final class ZombieIBoss extends Boss {
     }
 
     public void Start() {
-        host.addPotionEffect(new PotionEffect(PotionEffectType.ABSORPTION, Integer.MAX_VALUE, reader.GetZombieBossHealth()));
-        host.addPotionEffect(new PotionEffect(PotionEffectType.INCREASE_DAMAGE, Integer.MAX_VALUE, reader.GetZombieBossDamage()));
-        host.setCustomName(locales.GetLocaleString("ZombieBossName"));
+        host.addPotionEffect(new PotionEffect(Compat.ABSORPTION, Integer.MAX_VALUE, reader.GetZombieBossHealth()));
+        host.addPotionEffect(new PotionEffect(Compat.STRENGTH, Integer.MAX_VALUE, reader.GetZombieBossDamage()));
+        host.customName(GetName());
+        host.getPersistentDataContainer().set(Bloodmoon.GetInstance().BossKey(), org.bukkit.persistence.PersistentDataType.BYTE, (byte) 1);
         host.setCustomNameVisible(true);
         zombieHost.setBaby(false);
         Announce();
@@ -54,7 +55,7 @@ public final class ZombieIBoss extends Boss {
                 world.spawnParticle(Particle.PORTAL, host.getLocation(), 60);
             }
         }, 0L, 3L));
-        world.spawnParticle(Particle.EXPLOSION_HUGE, host.getLocation(), 60);
+        world.spawnParticle(Compat.EXPLOSION_HUGE, host.getLocation(), 60);
         ParseSpells();
     }
 
@@ -92,7 +93,7 @@ public final class ZombieIBoss extends Boss {
                 scheduler.scheduleSyncDelayedTask(Bloodmoon.GetInstance(), new Runnable() {
                     public void run() {
                         world.strikeLightningEffect(host.getLocation());
-                        world.spawnParticle(Particle.EXPLOSION_HUGE, host.getLocation(), 20);
+                        world.spawnParticle(Compat.EXPLOSION_HUGE, host.getLocation(), 20);
                     }
                 }, (long) (delayBase * i));
             }
@@ -130,15 +131,15 @@ public final class ZombieIBoss extends Boss {
         return host;
     }
 
-    public String GetName() {
-        return locales.GetLocaleString("ZombieBossName");
+    public net.kyori.adventure.text.Component GetName() {
+        return locales.Get("ZombieBossName");
     }
 
     public void Reward() {
         int max = reader.GetMaxItemsDropConfig();
         int min = reader.GetMinItemsDropConfig();
         Random rnd = new Random();
-        int amount = rnd.nextInt(max - min) + min;
+        int amount = Compat.randomBetween(min, max);
         if (amount == 0) {
             ++amount;
         }
@@ -148,7 +149,8 @@ public final class ZombieIBoss extends Boss {
 
         int expDrop;
         for(expDrop = 0; expDrop < amount; ++expDrop) {
-            world.dropItemNaturally(host.getLocation(), actuator.GetRandomBonus());
+            org.bukkit.inventory.ItemStack bonus = actuator.GetRandomBonus();
+            if (bonus != null) world.dropItemNaturally(host.getLocation(), bonus);
         }
 
         expDrop = rnd.nextInt(2) + 1;
@@ -165,6 +167,6 @@ public final class ZombieIBoss extends Boss {
 
     @Override
     public void Announce() {
-        LocaleReader.MessageAllLocale("ZombieBossSpawned", new String[]{"$b"}, new String[]{GetName()}, world);
+        LocaleReader.MessageAllLocale("ZombieBossSpawned", new String[]{"$b"}, new Object[]{GetName()}, world);
     }
 }

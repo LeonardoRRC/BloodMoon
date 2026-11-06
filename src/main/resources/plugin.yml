@@ -1,15 +1,17 @@
 name: BloodMoon
-version: 0.8.1
+version: ${version}
 main: org.spectralmemories.bloodmoon.Bloodmoon
 softdepend:
-  - "Mutliverse-Core"
+  - "Multiverse-Core"
   - "WorldGuard"
-api-version: 1.18
-authors: [SpectralMemories]
-description: A BloodMoon shines every couple of nights
+  - "PlaceholderAPI"
+api-version: '1.20'
+authors: [SpectralMemories, Leonardo Reynoso]
+description: A BloodMoon shines every couple of nights (unofficial continuation of SpectralMemories BloodMoon)
 commands:
   bloodmoon:
-    description: Base command. Should be followed by either show, start, stop or reload
+    description: BloodMoon commands. Use /bloodmoon help
+    aliases: [bm]
     permission: "bloodmoon.bloodmoon"
     permission-message: "You do not have the permission to do this"
   #Uncomment this section to unlock the testsuite command. Official releases will obviously pass all tests, but if you want to
@@ -21,6 +23,9 @@ commands:
 permissions:
   bloodmoon.bloodmoon:
     description: Allows to run the base bloodmoon command
+    default: true
+  bloodmoon.top:
+    description: Allows to see the kill ranking of the current bloodmoon
     default: true
   bloodmoon.show:
     description: Allows to see when a new bloodmoon will take place

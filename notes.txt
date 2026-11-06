@@ -1,3 +1,48 @@
+[0.9.0] Revival (unofficial continuation)
+
+Features:
+    - Enhanced mobs: monsters spawning during a BloodMoon get more speed, optional extra health, and a chance of
+      (enchanted) armor and weapons. Spawner mobs and boss minions are left alone. Gear does not drop by default
+    - Crimson Moon: a configurable share of BloodMoons become a harder Crimson Moon (purple bar, own title, warning
+      and start commands). Damage, toughness, experience, drops and enhanced mob chances are multiplied
+      /bloodmoon start crimson forces one
+    - Kill ranking: kills per player are counted during the BloodMoon; the ranking is shown when it ends and
+      reward commands run for the top positions and for everyone over a minimum. /bloodmoon top shows it live
+    - Ambience: on-screen title and a start sound when the BloodMoon begins, red particles around players during it
+    - PlaceholderAPI expansion (%bloodmoon_active%, %bloodmoon_days_left%, %bloodmoon_kills%, ...; see README)
+    - /bm alias, /bloodmoon help (clickable), and tab completion for subcommands, worlds and players
+    - MiniMessage everywhere: locales, boss name, boss bar, titles, item names and lore. Old & / § / &#RRGGBB
+      codes are converted automatically. Default locales now use MiniMessage (gradients for titles and the boss)
+      Item names and lore are no longer italic unless asked for
+    - New config keys are appended automatically (with comments) to existing world configs, and missing locales
+      are appended to locales.yml with their default text instead of showing "[String not found]"
+
+Compatibility:
+    - Built against Paper API 1.20.4 and Java 17; runs on Paper 1.20.4 to 1.21.x
+    - Paper only from now on (Paper forks such as Purpur work too): Adventure / MiniMessage is not available on plain Spigot
+    - Bosses carry a persistent tag, so they are found and removed on restart even after renaming them in locales.yml
+    - Particles, potion effects, enchantments and materials are looked up by name (1.20.5 renames no longer break the plugin)
+    - Old names in configs (SLOW, CONFUSION, DAMAGE_ALL...) are still accepted
+    - SnakeYAML is no longer bundled inside the jar (the server already ships it)
+    - Gradle wrapper added (Gradle 9.2.1)
+
+Bugfixes:
+    - Hordes: the delay between hordes used max + random instead of min + random
+    - Hordes / boss rewards / item drops: crash when the minimum equals the maximum
+    - Hordes, boss and underlings spawned inside the top block instead of on top of it
+    - Hordes now spread in every direction around the player, not only along one diagonal
+    - Invalid mob, item, enchantment or effect names log a warning instead of throwing an exception
+    - Crash on player death when death messages are disabled
+    - Crash when DropItemList is empty or every weight is 0
+    - Commands without ";s", ";f" or ";p" no longer crash
+    - softdepend typo "Mutliverse-Core"
+
+Misc:
+    - No rewards are given when the server shuts down in the middle of a BloodMoon
+    - Commands in the nether / end no longer throw an error
+
+-------------------------------------------------------------------------------------------------------------------
+
 [0.8] The Horde update
 
 Features:
