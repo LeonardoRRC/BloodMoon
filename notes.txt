@@ -10,6 +10,7 @@ Features:
       reward commands run for the top positions and for everyone over a minimum. /bloodmoon top shows it live
     - Ambience: on-screen title and a start sound when the BloodMoon begins, red particles around players during it
     - PlaceholderAPI expansion (%bloodmoon_active%, %bloodmoon_days_left%, %bloodmoon_kills%, ...; see README)
+    - LevelledMobs compatibility: bosses are not levelled, health/speed are left to LevelledMobs and every BloodMoon mob carries the bloodmoon:mob PDC key for externalplugins.yml (see README)
     - /bm alias, /bloodmoon help (clickable), and tab completion for subcommands, worlds and players
     - MiniMessage everywhere: locales, boss name, boss bar, titles, item names and lore. Old & / § / &#RRGGBB
       codes are converted automatically. Default locales now use MiniMessage (gradients for titles and the boss)

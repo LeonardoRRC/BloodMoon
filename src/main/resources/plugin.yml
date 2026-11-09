@@ -5,6 +5,7 @@ softdepend:
   - "Multiverse-Core"
   - "WorldGuard"
   - "PlaceholderAPI"
+  - "LevelledMobs"
 api-version: '1.20'
 authors: [SpectralMemories, Leonardo Reynoso]
 description: A BloodMoon shines every couple of nights (unofficial continuation of SpectralMemories BloodMoon)

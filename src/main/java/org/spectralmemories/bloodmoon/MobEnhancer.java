@@ -60,8 +60,11 @@ public final class MobEnhancer
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
+        // Con LevelledMobs la vida y la velocidad las decide su nivel; solo se agrega el equipo
+        boolean scaleStats = !LevelledMobsHook.HandlesStats(reader);
+
         double healthMult = reader.GetDouble(ConfigReader.ENHANCED_MOBS_HEALTH, 1.0);
-        if (healthMult > 0 && healthMult != 1.0)
+        if (scaleStats && healthMult > 0 && healthMult != 1.0)
         {
             AttributeInstance health = MAX_HEALTH == null ? null : mob.getAttribute(MAX_HEALTH);
             if (health != null)
@@ -72,7 +75,7 @@ public final class MobEnhancer
         }
 
         double speedMult = reader.GetDouble(ConfigReader.ENHANCED_MOBS_SPEED, 1.15);
-        if (speedMult > 0 && speedMult != 1.0)
+        if (scaleStats && speedMult > 0 && speedMult != 1.0)
         {
             AttributeInstance speed = MOVEMENT_SPEED == null ? null : mob.getAttribute(MOVEMENT_SPEED);
             if (speed != null) speed.setBaseValue(speed.getBaseValue() * speedMult);

@@ -273,7 +273,8 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
                     random.nextInt(maxDistance * 2 + 1) - maxDistance);
             newMobLocation.setY(world.getHighestBlockYAt(newMobLocation) + 1);
 
-            world.spawnEntity(newMobLocation, mobType);
+            world.spawn(newMobLocation, mobType.getEntityClass(),
+                    (java.util.function.Consumer<Entity>) mob -> LevelledMobsHook.Mark(mob, LevelledMobsHook.TYPE_HORDE));
             world.strikeLightningEffect(newMobLocation);
             spawned++;
         }
@@ -881,6 +882,8 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
         }
         if (!eligible) return;
 
+        // Va antes que LevelledMobs (que escucha en MONITOR), asi sus reglas ya ven la marca
+        LevelledMobsHook.Mark(entity, crimson ? LevelledMobsHook.TYPE_CRIMSON : LevelledMobsHook.TYPE_BLOODMOON);
         MobEnhancer.Enhance(entity, Bloodmoon.GetInstance().getConfigReader(world), GetDifficultyMultiplier());
     }
 

@@ -317,7 +317,8 @@ public abstract class Boss implements IBoss, Listener {
                     MobEnhancer.suppress = true;
                     try
                     {
-                        entity = world.spawn(location, host.getClass());
+                        entity = world.spawn(location, host.getType().getEntityClass(),
+                                (java.util.function.Consumer<Entity>) minion -> LevelledMobsHook.MarkBoss(minion, LevelledMobsHook.TYPE_MINION, reader));
                     }
                     finally
                     {

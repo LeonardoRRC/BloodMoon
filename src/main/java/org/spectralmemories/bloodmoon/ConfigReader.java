@@ -1062,6 +1062,20 @@ public class ConfigReader implements Closeable
     public static final String AMBIENT_PARTICLES = "AmbientParticles";
     public static final String AMBIENT_PARTICLE_AMOUNT = "AmbientParticleAmount";
 
+    public static final String LEVELLED_MOBS_STATS = "LevelledMobsHandlesStats";
+    public static final String LEVELLED_MOBS_LEVEL_BOSSES = "LevelledMobsLevelBosses";
+
+    public static final String LEVELLED_MOBS_BLOCK =
+            "\n#--- LevelledMobs compatibility (only used when LevelledMobs is installed) ---\n" +
+            "#Every BloodMoon mob carries the PDC key bloodmoon:mob with the value bloodmoon, crimson, horde, boss or minion,\n" +
+            "#so LevelledMobs rules can target them through externalplugins.yml (see the README)\n" +
+            "#true = LevelledMobs alone decides health and speed; enhanced mobs only get their armor and weapons,\n" +
+            "#so both plugins don't multiply the same stats. false = both scale them\n" +
+            LEVELLED_MOBS_STATS + ": true\n" +
+            "#false = LevelledMobs leaves bosses and their minions alone (no level, no nametag), so they keep\n" +
+            "#the name and health set by BloodMoon\n" +
+            LEVELLED_MOBS_LEVEL_BOSSES + ": false\n";
+
     public static final String FEATURES_09_BLOCK =
             "\n#==================== Added in 0.9 ====================\n" +
             "\n#--- Enhanced mobs: monsters that spawn during a BloodMoon get stronger ---\n" +
@@ -1123,17 +1137,21 @@ public class ConfigReader implements Closeable
             "#Red particles floating around players during the BloodMoon\n" +
             AMBIENT_PARTICLES + ": true\n" +
             "#Particles per player every half second\n" +
-            AMBIENT_PARTICLE_AMOUNT + ": 6\n";
+            AMBIENT_PARTICLE_AMOUNT + ": 6\n" +
+            LEVELLED_MOBS_BLOCK;
 
     /**
-     * Agrega las claves de 0.9 a un config creado con una version anterior
+     * Agrega las claves nuevas a un config creado con una version anterior
      */
     public void EnsureFeatureBlock ()
     {
-        if (Raw(ENHANCED_MOBS_ENABLED) != null) return;
+        String missing = null;
+        if (Raw(ENHANCED_MOBS_ENABLED) == null) missing = FEATURES_09_BLOCK;
+        else if (Raw(LEVELLED_MOBS_STATS) == null) missing = LEVELLED_MOBS_BLOCK;
+        if (missing == null) return;
         try (FileWriter writer = new FileWriter(configFile, true))
         {
-            writer.append(FEATURES_09_BLOCK);
+            writer.append(missing);
         }
         catch (IOException e)
         {

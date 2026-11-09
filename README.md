@@ -70,6 +70,50 @@ From the console, put the world name right after the subcommand: `bm start world
 
 `active`, `crimson`, `days_left` and `time_left` also accept a world name at the end, for example `%bloodmoon_days_left_survival%`.
 
+## LevelledMobs
+
+BloodMoon detects [LevelledMobs](https://arcaneplugins.gitbook.io/levelledmobs-the-ultimate-mob-levelling-solution) on its own; nothing has to be installed or enabled.
+
+- **No double scaling**: with `LevelledMobsHandlesStats: true` (default) enhanced mobs keep their armor and weapons,
+  but health and speed are left to LevelledMobs.
+- **Bosses keep their identity**: with `LevelledMobsLevelBosses: false` (default) the zombie boss and its minions get
+  the `levelledmobs:nolevel` key, so LevelledMobs gives them no level and no nametag.
+- **Rules for BloodMoon mobs**: every BloodMoon mob carries the PDC key `bloodmoon:mob` with the value
+  `bloodmoon`, `crimson`, `horde`, `boss` or `minion`. Add it to LevelledMobs' `externalplugins.yml`:
+
+```yaml
+bloodmoon:
+  friendly-name: 'bloodmoon'
+  plugin-name: 'BloodMoon'
+  key-name: 'mob'
+  key-type: 'PDC'
+  requirement: 'exists'
+  placeholder-name: '%bloodmoon-type%'
+
+crimson-moon:
+  friendly-name: 'crimson-moon'
+  plugin-name: 'BloodMoon'
+  key-name: 'mob'
+  key-type: 'PDC'
+  requirement: 'contains'
+  requirement-value: 'crimson'
+```
+
+and use it in a `rules.yml` custom rule, for example to give mobs higher levels during a Crimson Moon:
+
+```yaml
+  - custom-rule: 'Crimson Moon mobs'
+    is-enabled: true
+    conditions:
+      external-plugins:
+        included-list: ['crimson-moon']
+    settings:
+      minLevel: 20
+      maxLevel: 50
+```
+
+BloodMoon's own XP, drop and damage multipliers still apply on top of the levels; lower them in `config.yml` if the result is too strong.
+
 ## Building
 
 Requires any JDK 17 or newer:

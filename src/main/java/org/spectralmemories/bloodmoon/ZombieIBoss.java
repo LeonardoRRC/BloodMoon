@@ -28,10 +28,12 @@ public final class ZombieIBoss extends Boss {
     Zombie zombieHost;
 
     public ZombieIBoss(Location location) {
-        host = (Monster) location.getWorld().spawnEntity(location, EntityType.ZOMBIE);
-        zombieHost = (Zombie)host;
-        world = host.getWorld();
+        world = location.getWorld();
         reader = Bloodmoon.GetInstance().getConfigReader(world);
+        // Las marcas se ponen antes de que aparezca: LevelledMobs procesa el mob al aparecer
+        host = world.spawn(location, Zombie.class,
+                (java.util.function.Consumer<Zombie>) zombie -> LevelledMobsHook.MarkBoss(zombie, LevelledMobsHook.TYPE_BOSS, reader));
+        zombieHost = (Zombie)host;
         locales = Bloodmoon.GetInstance().getLocaleReader();
         scheduler = Bloodmoon.GetInstance().GetScheduler();
         tasks = new ArrayList();
