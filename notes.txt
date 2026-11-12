@@ -1,3 +1,8 @@
+[0.9.1]
+    - BloodMoonDurationMinutes and SunriseWhenOver: shorter BloodMoons that can end with a sunrise
+    - Nexo custom items with nexo/<id> in DropItemList and in rewards
+    - "item <ITEM>:<AMOUNT>" reward lines give the item directly instead of running a command
+
 [0.9.0] Revival (unofficial continuation)
 
 Features:

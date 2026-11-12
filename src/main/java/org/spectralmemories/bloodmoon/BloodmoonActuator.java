@@ -73,6 +73,8 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
 
     // 0.9
     private boolean crimson = false;
+    /** Tick (getFullTime) en que termina la luna por BloodMoonDurationMinutes, o -1 si dura hasta el amanecer */
+    private long endsAt = -1;
     private boolean forceCrimsonNext = false;
     private final Map<UUID, Integer> kills = new HashMap<>();
     private int ambientTask = -1;
@@ -144,6 +146,34 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
         return crimson ? Bloodmoon.GetInstance().getConfigReader(world).GetCrimsonMultiplier() : 1.0;
     }
 
+    /**
+     * Ticks que faltan para que termine: al amanecer o al cumplirse BloodMoonDurationMinutes, lo que llegue antes
+     */
+    public long GetTicksLeft ()
+    {
+        long untilDawn = Math.max(0, PeriodicNightCheck.DAY - world.getTime());
+        if (endsAt < 0) return untilDawn;
+        return Math.max(0, Math.min(untilDawn, endsAt - world.getFullTime()));
+    }
+
+    /**
+     * Duracion total de esta luna en ticks, para la barra de progreso
+     */
+    public long GetTotalTicks ()
+    {
+        double minutes = Bloodmoon.GetInstance().getConfigReader(world).GetDouble(ConfigReader.DURATION_MINUTES, 0);
+        long night = PeriodicNightCheck.DAY - 12000;
+        return endsAt < 0 || minutes <= 0 ? night : Math.max(1, Math.min(night, Math.round(minutes * 1200)));
+    }
+
+    /**
+     * @return true si ya se cumplio BloodMoonDurationMinutes
+     */
+    public boolean IsDurationOver ()
+    {
+        return inProgress && endsAt >= 0 && world.getFullTime() >= endsAt;
+    }
+
     public void StartBloodMoon ()
     {
         ConfigReader startReader = Bloodmoon.GetInstance().getConfigReader(world);
@@ -152,6 +182,9 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
         crimson = forceCrimsonNext || (!permanent && crimsonChance > 0 && new Random().nextDouble() * 100 < crimsonChance);
         forceCrimsonNext = false;
         kills.clear();
+
+        double minutes = startReader.GetDouble(ConfigReader.DURATION_MINUTES, 0);
+        endsAt = (!permanent && minutes > 0) ? world.getFullTime() + Math.round(minutes * 1200) : -1;
 
         inProgress = true;
         RunPreCommand();
@@ -191,6 +224,7 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
         if (giveRewards) HandleKillRewards();
         inProgress = false;
         crimson = false;
+        endsAt = -1;
 
         StopStorm();
         HideNightBar();
@@ -462,11 +496,7 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
             if (nightBar != null) nightBar.progress(1.0f);
             return;
         }
-        long timeTotal = 12000;
-        long currentTime = world.getTime();
-        long timeLeft = PeriodicNightCheck.DAY - currentTime;
-
-        double percent = (double) timeLeft / (double) timeTotal;
+        double percent = (double) GetTicksLeft() / (double) GetTotalTicks();
 
         if (nightBar != null && percent >= 0.0 && percent <= 1.0f) nightBar.progress((float) (1.0 - percent));
     }
@@ -640,7 +670,49 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
                 .replace("$w", world.getName());
         if (finalCommand.startsWith("/")) finalCommand = finalCommand.substring(1);
         if (finalCommand.isEmpty()) return;
+        if (finalCommand.toLowerCase().startsWith("item "))
+        {
+            GiveRewardItem(finalCommand.substring(5).trim(), entry.getKey());
+            return;
+        }
         Bukkit.dispatchCommand(Bukkit.getConsoleSender(), finalCommand);
+    }
+
+    /**
+     * "item [ITEM]:[CANTIDAD]" de las recompensas: entrega el item al jugador; lo que no cabe cae a sus pies
+     */
+    private void GiveRewardItem (String spec, UUID playerId)
+    {
+        Player player = Bukkit.getPlayer(playerId);
+        if (player == null)
+        {
+            Compat.warn("No se entrego '" + spec + "' a " + NameOf(playerId) + ": no estaba conectado al terminar la luna");
+            return;
+        }
+        // ParseItem espera ITEM:CANTIDAD:PESO; el peso no se usa aqui
+        String[] head = spec.split(":(?=\\$(name|desc|enchant))", 2);
+        String[] base = head[0].split(":");
+        String normalized = base[0] + ":" + (base.length > 1 ? base[1] : "1") + ":1" + (head.length > 1 ? ":" + head[1] : "");
+        ItemStack item = ParseItem(normalized);
+        if (item == null) return;
+
+        int total = 1;
+        try
+        {
+            if (base.length > 1) total = Math.max(1, Integer.parseInt(base[1].trim()));
+        }
+        catch (NumberFormatException ignored) {}
+
+        // Se reparte en stacks validos (por ejemplo 100 lingotes = 64 + 36)
+        int max = Math.max(1, item.getMaxStackSize());
+        while (total > 0)
+        {
+            ItemStack stack = item.clone();
+            stack.setAmount(Math.min(max, total));
+            total -= stack.getAmount();
+            for (ItemStack left : player.getInventory().addItem(stack).values())
+                player.getWorld().dropItemNaturally(player.getLocation(), left);
+        }
     }
 
     private void BroadcastBloodMoonWarning ()
@@ -724,13 +796,6 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
         String[] parts = new String[3 + head.length - 1];
         for (int i = 0; i < 3; i++) parts[i] = i < base.length ? base[i] : "1";
         System.arraycopy(head, 1, parts, 3, head.length - 1);
-        Material itemMaterial = Compat.material(parts[0]);
-        if (itemMaterial == null || !itemMaterial.isItem())
-        {
-            Compat.warn("Material desconocido en DropItemList: '" + parts[0] + "'");
-            return null;
-        }
-
         int amount = 1;
         try
         {
@@ -738,7 +803,23 @@ public class BloodmoonActuator implements Listener, Runnable, Closeable
         }
         catch (NumberFormatException ignored) {}
 
-        ItemStack itemStack = new ItemStack(itemMaterial, amount);
+        ItemStack itemStack;
+        if (NexoHook.IsNexoItem(parts[0]))
+        {
+            itemStack = NexoHook.Create(parts[0]);
+            if (itemStack == null) return null;
+            itemStack.setAmount(Math.min(amount, itemStack.getMaxStackSize()));
+        }
+        else
+        {
+            Material itemMaterial = Compat.material(parts[0]);
+            if (itemMaterial == null || !itemMaterial.isItem())
+            {
+                Compat.warn("Material desconocido en DropItemList: '" + parts[0] + "'");
+                return null;
+            }
+            itemStack = new ItemStack(itemMaterial, amount);
+        }
 
         for (int i = 3; i < parts.length; i++)
         {

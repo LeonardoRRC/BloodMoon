@@ -209,8 +209,17 @@ public class PeriodicNightCheck implements Runnable, Listener
         ConfigReader configReader = Bloodmoon.GetInstance().getConfigReader(world);
         if (actuator.isInProgress())
         {
+            //Si se cumplio BloodMoonDurationMinutes, termina ya; con SunriseWhenOver tambien amanece
+            boolean durationOver = actuator.IsDurationOver();
+            if (durationOver && world.getTime() >= 12000 && configReader.GetBool(ConfigReader.SUNRISE_WHEN_OVER, true))
+            {
+                // Se avanza al dia siguiente (nunca hacia atras) para no alterar la cuenta de dias
+                long fullTime = world.getFullTime();
+                world.setFullTime(fullTime - (fullTime % DAY) + DAY);
+            }
+
             //If Blood Moon is in progress but its daytime, stop it
-            if (world.getTime() < 12000)
+            if (world.getTime() < 12000 || durationOver)
             {
 
                 LocaleReader.MessageAllLocale("BloodMoonEndingMessage", null, null, world);
@@ -220,7 +229,8 @@ public class PeriodicNightCheck implements Runnable, Listener
                     if (configReader.GetBloodMoonEndSoundConfig())
                         player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 100.0f, 1.2f);
                 }
-                checkupAfter = 0; //This avoids some bugs when players use /time set 0
+                // Si termino por duracion y sigue de noche, el aviso de dias espera a la proxima tarde
+                checkupAfter = world.getTime() >= 12000 ? getNextEvening() : 0; //0 avoids some bugs when players use /time set 0
             }
 
         }

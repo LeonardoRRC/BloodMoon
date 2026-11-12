@@ -180,6 +180,7 @@ public class ConfigReader implements Closeable
             writer.write("#The enchantment list argument is formatted as follow: \"$enchant [ENCHANT NAME],[LEVEL];\"\n");
             writer.write("#The percent chance of an item dropping is equal to [item weight] / [total weight] * 100\n");
             writer.write("#Please refer to https://hub.spigotmc.org/javadocs/spigot/org/bukkit/Material.html for the list of items\n");
+            writer.write("#Custom items from Nexo use nexo/<id> as the item code, for example \"nexo/bloodstone_ingot:2:5\"\n");
             writer.write("#Enchantment names are exactly as they appear in-game, except with \"_\" replacing spaces. Case is irrelevant\n");
             writer.write(DROP_ITEM_LIST + ":\n");
             writer.write("  - \"IRON_INGOT:5:10\"\n");
@@ -1076,6 +1077,16 @@ public class ConfigReader implements Closeable
             "#the name and health set by BloodMoon\n" +
             LEVELLED_MOBS_LEVEL_BOSSES + ": false\n";
 
+    public static final String DURATION_MINUTES = "BloodMoonDurationMinutes";
+    public static final String SUNRISE_WHEN_OVER = "SunriseWhenOver";
+
+    public static final String DURATION_BLOCK =
+            "\n#--- Duration ---\n" +
+            "#Real minutes the BloodMoon lasts. A whole Minecraft night is 10 minutes. 0 = until sunrise\n" +
+            DURATION_MINUTES + ": 0\n" +
+            "#true = when the time is up the sun rises in this world; false = the rest of the night is a normal night\n" +
+            SUNRISE_WHEN_OVER + ": true\n";
+
     public static final String FEATURES_09_BLOCK =
             "\n#==================== Added in 0.9 ====================\n" +
             "\n#--- Enhanced mobs: monsters that spawn during a BloodMoon get stronger ---\n" +
@@ -1122,6 +1133,8 @@ public class ConfigReader implements Closeable
             KILL_REWARD_MINIMUM_KILLS + ": 5\n" +
             "#Commands for the top players, run from the console: \"[POSITION];[COMMAND]\"\n" +
             "#$p = player name, $k = kills, $w = world. Several commands can share a position\n" +
+            "#\"item [ITEM]:[AMOUNT]\" gives an item straight to the player instead of running a command. [ITEM] is a\n" +
+            "#material or nexo/<id> for a Nexo item, and accepts $name/$desc/$enchant like DropItemList\n" +
             KILL_REWARD_TOP_COMMANDS + ":\n" +
             "  - \"1;give $p diamond 5\"\n" +
             "  - \"2;give $p diamond 3\"\n" +
@@ -1138,17 +1151,23 @@ public class ConfigReader implements Closeable
             AMBIENT_PARTICLES + ": true\n" +
             "#Particles per player every half second\n" +
             AMBIENT_PARTICLE_AMOUNT + ": 6\n" +
-            LEVELLED_MOBS_BLOCK;
+            LEVELLED_MOBS_BLOCK +
+            DURATION_BLOCK;
 
     /**
      * Agrega las claves nuevas a un config creado con una version anterior
      */
     public void EnsureFeatureBlock ()
     {
-        String missing = null;
+        String missing;
         if (Raw(ENHANCED_MOBS_ENABLED) == null) missing = FEATURES_09_BLOCK;
-        else if (Raw(LEVELLED_MOBS_STATS) == null) missing = LEVELLED_MOBS_BLOCK;
-        if (missing == null) return;
+        else
+        {
+            missing = "";
+            if (Raw(LEVELLED_MOBS_STATS) == null) missing += LEVELLED_MOBS_BLOCK;
+            if (Raw(DURATION_MINUTES) == null) missing += DURATION_BLOCK;
+        }
+        if (missing.isEmpty()) return;
         try (FileWriter writer = new FileWriter(configFile, true))
         {
             writer.append(missing);

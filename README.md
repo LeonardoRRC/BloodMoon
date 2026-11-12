@@ -114,6 +114,15 @@ and use it in a `rules.yml` custom rule, for example to give mobs higher levels 
 
 BloodMoon's own XP, drop and damage multipliers still apply on top of the levels; lower them in `config.yml` if the result is too strong.
 
+## Duration and custom items (0.9.1)
+
+- `BloodMoonDurationMinutes`: real minutes a BloodMoon lasts (a whole night is 10). `0` keeps it until sunrise.
+  With `SunriseWhenOver: true` the sun rises when the time is up; with `false` the rest of the night is a normal night.
+- Items from [Nexo](https://nexomc.com) can be used anywhere an item is expected by writing `nexo/<id>` as the item code:
+  `"nexo/bloodstone_ingot:2:5"` in `DropItemList`.
+- Reward lines (`KillRewardTopCommands`, `KillRewardParticipationCommands`) accept `item <ITEM>:<AMOUNT>` to put an item
+  straight into the player's inventory (overflow drops at their feet): `"1;item nexo/bloodstone_block:1"`, `"item DIAMOND:3"`.
+
 ## Building
 
 Requires any JDK 17 or newer:

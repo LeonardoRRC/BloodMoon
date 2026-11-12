@@ -140,8 +140,8 @@ public class BloodMoonExpansion extends PlaceholderExpansion
                 if (!active) return "-";
                 ConfigReader reader = Bloodmoon.GetInstance().getConfigReader(world);
                 if (reader != null && reader.GetPermanentBloodMoonConfig()) return "-";
-                // la luna termina al amanecer (tick 24000); 20 ticks = 1 segundo
-                long ticks = Math.max(0, PeriodicNightCheck.DAY - world.getTime());
+                // al amanecer o al cumplirse BloodMoonDurationMinutes; 20 ticks = 1 segundo
+                long ticks = actuator.GetTicksLeft();
                 long seconds = ticks / 20;
                 return String.format("%02d:%02d", seconds / 60, seconds % 60);
             default:
